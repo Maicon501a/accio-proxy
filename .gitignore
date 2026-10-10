@@ -1,0 +1,41 @@
+# Binários e executáveis
+*.exe
+*.dll
+*.so
+*.dylib
+app/accio-proxy.exe
+app/*.exe
+app/build/bin/
+
+# Dependências Node.js
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Builds Frontend
+dist/
+**/dist/
+app/frontend/dist/
+
+# Caches e arquivos temporários de IDE/SO
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Dumps e dados locais sensíveis
+traffic-dump.jsonl
+*.log
+*.sqlite
+*.db
+app/data/
+**/data/*.db
+
+# Scratch e arquivos temporários de teste
+scratch/
+C:/Users/*
