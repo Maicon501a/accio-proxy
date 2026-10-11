@@ -39,3 +39,6 @@ app/data/
 # Scratch e arquivos temporários de teste
 scratch/
 C:/Users/*
+app/security-guard/
+app/cmd/testchat/
+

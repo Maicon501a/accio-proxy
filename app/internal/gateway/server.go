@@ -175,8 +175,8 @@ func (s *Server) streamWithWarmRetry(ctx context.Context, request map[string]any
 
 	if phoenix.IsUnauthorized(err) {
 		if isOfficial && s.official != nil {
-			log.Printf("gateway: token expirado no modo oficial — recarregando do vault")
-			if _, newTok, rerr := s.official.GetActiveToken(ctx); rerr == nil && newTok != "" && newTok != token {
+			log.Printf("gateway: token expirado/rejeitado no modo oficial (401/402) — forçando reload dos arquivos .enc")
+			if _, newTok, rerr := s.official.ReloadTokens(ctx); rerr == nil && newTok != "" {
 				request["token"] = newTok
 				err = s.client.StreamChat(ctx, request, newTok, emit)
 			}

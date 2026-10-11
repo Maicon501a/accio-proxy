@@ -472,6 +472,39 @@ func (m *Manager) RefreshCredits(ctx context.Context) (map[string]any, error) {
 	return creds, nil
 }
 
+// ReloadTokens força o reload dos arquivos do disco (DPAPI) e atualiza a conta ativa.
+func (m *Manager) ReloadTokens(ctx context.Context) (email, token string, err error) {
+	st, err := m.CheckAlive(ctx)
+	if err != nil || !st.Running {
+		return "", "", errors.New("o app oficial do Accio não está aberto ou autenticado")
+	}
+
+	activeEmail, _ := st.ActiveAccount["desensitizedEmail"].(string)
+	activeID, _ := st.ActiveAccount["id"].(string)
+	if activeEmail == "" && activeID != "" {
+		activeEmail = "accio-" + activeID
+	}
+
+	tokens, err := m.loadTokensFromDisk()
+	if err != nil {
+		return "", "", fmt.Errorf("ler token da conta oficial: %w", err)
+	}
+
+	m.mu.Lock()
+	m.cachedTokens = tokens
+	m.lastActiveID = activeID
+	m.mu.Unlock()
+
+	tok := tokens[activeID]
+	if tok == "" {
+		tok = tokens["__active__"]
+	}
+	if tok == "" {
+		return "", "", fmt.Errorf("token da conta %s não encontrado no vault local", activeID)
+	}
+	return activeEmail, tok, nil
+}
+
 // GetActiveToken returns (email, accessToken, error) for the active account in the official Accio app.
 func (m *Manager) GetActiveToken(ctx context.Context) (email, token string, err error) {
 	st := m.GetStatus()
@@ -487,32 +520,15 @@ func (m *Manager) GetActiveToken(ctx context.Context) (email, token string, err 
 
 	m.mu.RLock()
 	cachedTok := m.cachedTokens[activeID]
-	if cachedTok == "" {
-		cachedTok = m.cachedTokens["__active__"]
-	}
+	lastID := m.lastActiveID
 	m.mu.RUnlock()
 
-	if cachedTok != "" {
-		return activeEmail, cachedTok, nil
+	// Se a conta mudou ou o token não está em cache, recarrega do disco
+	if cachedTok == "" || activeID != lastID {
+		return m.ReloadTokens(ctx)
 	}
 
-	// Reload tokens from disk
-	tokens, err := m.loadTokensFromDisk()
-	if err != nil {
-		return "", "", fmt.Errorf("ler token da conta oficial: %w", err)
-	}
-	m.mu.Lock()
-	m.cachedTokens = tokens
-	m.mu.Unlock()
-
-	tok := tokens[activeID]
-	if tok == "" {
-		tok = tokens["__active__"]
-	}
-	if tok == "" {
-		return "", "", fmt.Errorf("token da conta %s não encontrado no vault local", activeID)
-	}
-	return activeEmail, tok, nil
+	return activeEmail, cachedTok, nil
 }
 
 func (m *Manager) getCli() *GatewayCLI {
