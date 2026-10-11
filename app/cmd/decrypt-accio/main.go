@@ -1,3 +1,5 @@
+//go:build windows
+
 // decrypt-accio descriptografa os .enc do app Accio (Electron safeStorage):
 // Local State os_crypt.encrypted_key (DPAPI) -> AES-256-GCM -> tokens.
 package main

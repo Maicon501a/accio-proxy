@@ -23,6 +23,21 @@ Com ele, você pode conectar clientes como **OpenCode**, **Cursor**, **Cline**, 
 
 ---
 
+## 🚀 Download Rápido (Executáveis Prontos)
+
+Você não precisa compilar nada nem ter Go instalado. Basta baixar o executável para o seu sistema operacional:
+
+| Plataforma | Download | Instruções |
+| :--- | :--- | :--- |
+| 🪟 **Windows** | [**`accio-proxy.exe`**](https://github.com/Maicon501a/accio-proxy/releases/latest/download/accio-proxy.exe) | Baixe e dê dois cliques para abrir. |
+| 🪟 **Windows (Zip)** | [**`accio-proxy-windows-amd64.zip`**](https://github.com/Maicon501a/accio-proxy/releases/latest/download/accio-proxy-windows-amd64.zip) | Extraia e execute o `accio-proxy.exe`. |
+| 🐧 **Linux** | [**`accio-proxy-linux-amd64`**](https://github.com/Maicon501a/accio-proxy/releases/latest/download/accio-proxy-linux-amd64) | `chmod +x accio-proxy-linux-amd64 && ./accio-proxy-linux-amd64` |
+| 🐧 **Linux (Tar.gz)** | [**`accio-proxy-linux-amd64.tar.gz`**](https://github.com/Maicon501a/accio-proxy/releases/latest/download/accio-proxy-linux-amd64.tar.gz) | Descompacte e execute. |
+
+> Todas as versões e builds anteriores também estão disponíveis na aba [**Releases**](https://github.com/Maicon501a/accio-proxy/releases).
+
+---
+
 ## ⚡ Modos de Operação (Dual-Mode Architecture)
 
 O proxy disponibiliza um botão alternador em tempo real (na sidebar e no dashboard) entre dois modos de funcionamento:
