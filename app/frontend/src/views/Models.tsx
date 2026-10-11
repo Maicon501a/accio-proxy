@@ -49,6 +49,7 @@ export default function Models({ onSelectPlayground }: { onSelectPlayground?: (m
     if (filter === "reasoning") return m.reason;
     if (filter === "no-reasoning") return !m.reason;
     if (filter === "free") return m.free_use;
+    if (filter === "vip") return !m.free_use;
     return m.owned_by === filter;
   });
 
@@ -74,15 +75,15 @@ export default function Models({ onSelectPlayground }: { onSelectPlayground?: (m
         catálogo completo do Accio Proxy — use estes IDs no OpenCode, Cline ou Cursor (OpenAI-compatible)
       </p>
 
-      {/* Banner Informativo sobre Raciocínio (DeepSeek & GLM) */}
+      {/* Banner Informativo sobre Raciocínio e Custo */}
       <div className="official-banner" style={{ marginBottom: 20 }}>
         <div className="info-col">
           <div className="title">
             <span className="dot" style={{ background: "var(--green)" }} />
-            Esforços de Raciocínio (Reasoning Efforts)
+            Consumo de Créditos e Acesso Oficial
           </div>
           <div className="desc">
-            Modelos como <strong>DeepSeek V4 Flash</strong> e <strong>GLM 5.3</strong> operam em modo direto (sem esforço de raciocínio configurável na API do Accio). Modelos como <strong>GPT-6 Astra</strong>, <strong>GPT-5.6</strong>, <strong>Claude Opus/Sonnet</strong> e <strong>Gemini</strong> aceitam parâmetros de raciocínio (<span className="mono">low, medium, high, max</span>).
+            Todos os modelos consomem quota das contas na proporção do seu <strong>multiplicador oficial</strong> (ex: <span className="mono">0.03x</span> até <span className="mono">3.5x</span> créditos). O selo <strong>Conta Free</strong> indica modelos liberados para contas gratuitas utilizarem seus créditos diários; <strong>Exclusivo VIP</strong> são restritos pelo Accio a contas com assinatura paga.
           </div>
         </div>
       </div>
@@ -105,7 +106,13 @@ export default function Models({ onSelectPlayground }: { onSelectPlayground?: (m
             Com Raciocínio ({models.filter((m) => m.reason).length})
           </button>
           <button className={"subtab-btn" + (filter === "no-reasoning" ? " active" : "")} onClick={() => setFilter("no-reasoning")}>
-            Direto / Sem Raciocínio ({models.filter((m) => !m.reason).length})
+            Direto ({models.filter((m) => !m.reason).length})
+          </button>
+          <button className={"subtab-btn" + (filter === "free" ? " active" : "")} onClick={() => setFilter("free")}>
+            Conta Free ({models.filter((m) => m.free_use).length})
+          </button>
+          <button className={"subtab-btn" + (filter === "vip" ? " active" : "")} onClick={() => setFilter("vip")}>
+            Exclusivo VIP ({models.filter((m) => !m.free_use).length})
           </button>
           {providers.map((p) => (
             <button
@@ -134,7 +141,8 @@ export default function Models({ onSelectPlayground }: { onSelectPlayground?: (m
                 <th>Raciocínio</th>
                 <th>Contexto</th>
                 <th>Capacidades</th>
-                <th>Custo</th>
+                <th>Custo (Créditos)</th>
+                <th>Acesso</th>
                 <th style={{ textAlign: "right" }}>Ações</th>
               </tr>
             </thead>
@@ -231,13 +239,51 @@ export default function Models({ onSelectPlayground }: { onSelectPlayground?: (m
                       </div>
                     </td>
                     <td>
-                      {m.free_use ? (
-                        <span style={{ color: "var(--green)", fontSize: 12, fontWeight: 500 }}>
-                          Grátis
+                      {m.usage_multiple > 0 ? (
+                        <span
+                          style={{
+                            fontWeight: 600,
+                            fontSize: 12,
+                            color:
+                              m.usage_multiple >= 1.5
+                                ? "#f87171"
+                                : m.usage_multiple < 0.2
+                                ? "var(--green)"
+                                : "#fbbf24",
+                          }}
+                        >
+                          {m.usage_multiple}x
                         </span>
                       ) : (
                         <span style={{ color: "var(--text-dim)", fontSize: 12 }}>
-                          {m.usage_multiple > 0 ? `${m.usage_multiple}x` : "pago"}
+                          1.0x (Padrão)
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      {m.free_use ? (
+                        <span
+                          className="badge"
+                          style={{
+                            fontSize: 11,
+                            background: "rgba(52,211,153,0.12)",
+                            color: "var(--green)",
+                            border: "1px solid rgba(52,211,153,0.3)",
+                          }}
+                        >
+                          Conta Free
+                        </span>
+                      ) : (
+                        <span
+                          className="badge"
+                          style={{
+                            fontSize: 11,
+                            background: "rgba(245,158,11,0.12)",
+                            color: "#fbbf24",
+                            border: "1px solid rgba(245,158,11,0.3)",
+                          }}
+                        >
+                          Exclusivo VIP
                         </span>
                       )}
                     </td>
