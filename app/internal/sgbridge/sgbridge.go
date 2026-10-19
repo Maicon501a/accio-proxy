@@ -11,6 +11,7 @@ package sgbridge
 import (
 	"bufio"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +24,9 @@ import (
 	"sync"
 	"time"
 )
+
+//go:embed sg_daemon.js
+var defaultSGDaemonJS []byte
 
 const DesktopAppKey = "35336201"
 
@@ -272,27 +276,68 @@ func (d *daemon) shutdown() {
 
 // ---- bundle management ----
 
+func hasNativeFiles(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	for _, rel := range []string{
+		filepath.Join("prebuild", "win32-x64", "security_guard.node"),
+		filepath.Join("resources", "x64", "AliSafeProxy.dll"),
+	} {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func bundleComplete(dir string) bool {
+	if !hasNativeFiles(dir) {
+		return false
+	}
+	daemonPath := filepath.Join(dir, "sg_daemon.js")
+	if _, err := os.Stat(daemonPath); err != nil {
+		return false
+	}
+	return true
+}
+
 // ensureBundle materialises the security-guard bundle (sg_daemon.js +
 // prebuild/ + resources/) into <dataDir>/security-guard, copying from any
 // known complete source on first run.
 func ensureBundle(dataDir string) (string, error) {
 	target := filepath.Join(dataDir, "security-guard")
+
+	// Se o target ainda não tem os binários nativos do SecurityGuard, copia de fontes instaladas do Accio
+	if !hasNativeFiles(target) {
+		for _, src := range bundleSources() {
+			if !hasNativeFiles(src) {
+				continue
+			}
+			if err := copyTree(src, target); err != nil {
+				log.Printf("sgbridge: bundle copy from %s failed: %v", src, err)
+				continue
+			}
+			if hasNativeFiles(target) {
+				break
+			}
+		}
+	}
+
+	// Sempre assegura que o sg_daemon.js está gravado no target a partir do código Go embutido
+	if len(defaultSGDaemonJS) > 0 {
+		daemonFile := filepath.Join(target, "sg_daemon.js")
+		if _, err := os.Stat(daemonFile); err != nil {
+			_ = os.MkdirAll(target, 0o755)
+			_ = os.WriteFile(daemonFile, defaultSGDaemonJS, 0o644)
+		}
+	}
+
 	if bundleComplete(target) {
 		return target, nil
 	}
-	for _, src := range bundleSources() {
-		if !bundleComplete(src) {
-			continue
-		}
-		if err := copyTree(src, target); err != nil {
-			log.Printf("sgbridge: bundle copy from %s failed: %v", src, err)
-			continue
-		}
-		if bundleComplete(target) {
-			return target, nil
-		}
-	}
-	return "", errors.New("security-guard bundle not found (checked GrokDesktop data dir and installed Accio app)")
+
+	return "", errors.New("security-guard bundle not found (verifique se o aplicativo Accio Desktop oficial está instalado na máquina)")
 }
 
 func bundleSources() []string {
@@ -302,9 +347,15 @@ func bundleSources() []string {
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		out = append(out, filepath.Join(home, "AppData", "Local", "GrokDesktop", "security-guard"))
+		out = append(out, filepath.Join(home, "AppData", "Local", "AccioProxy", "security-guard"))
 	}
 	if local := os.Getenv("LOCALAPPDATA"); local != "" {
 		out = append(out, filepath.Join(local, "Programs", "Accio", "resources", "app.asar.unpacked", "node_modules", "@phoenix-common", "security-guard"))
+	}
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		out = append(out, filepath.Join(exeDir, "security-guard"))
+		out = append(out, filepath.Join(exeDir, "..", "security-guard"))
 	}
 	return out
 }
@@ -333,21 +384,6 @@ process.stderr.write("[sg-hooked] Install -> " + rc + " seed=" + process.env.SGT
 require(path.join(__dirname, "sg_daemon.js"));
 `
 	return os.WriteFile(filepath.Join(bundleDir, "sg_daemon_hooked.js"), []byte(wrapper), 0644)
-}
-
-func bundleComplete(dir string) bool {	if dir == "" {
-		return false
-	}
-	for _, rel := range []string{
-		"sg_daemon.js",
-		filepath.Join("prebuild", "win32-x64", "security_guard.node"),
-		filepath.Join("resources", "x64", "AliSafeProxy.dll"),
-	} {
-		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
-			return false
-		}
-	}
-	return true
 }
 
 func copyTree(src, dst string) error {
@@ -385,7 +421,12 @@ func nodePath() (string, error) {
 		return v, nil
 	}
 	// Accio ships its own Node under pre-install.
-	root := filepath.Join(os.Getenv("APPDATA"), "Accio", "pre-install")
+	appData := os.Getenv("APPDATA")
+	if appData == "" {
+		home, _ := os.UserHomeDir()
+		appData = filepath.Join(home, "AppData", "Roaming")
+	}
+	root := filepath.Join(appData, "Accio", "pre-install")
 	var found string
 	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err == nil && info != nil && !info.IsDir() && strings.EqualFold(info.Name(), "node.exe") {
@@ -394,8 +435,16 @@ func nodePath() (string, error) {
 		}
 		return nil
 	})
-	if found == "" {
-		return "", errors.New("node.js not found; install Node or set ACCIO_NODE_PATH")
+	if found != "" {
+		return found, nil
 	}
-	return found, nil
+	for _, c := range []string{
+		`C:\Program Files\nodejs\node.exe`,
+		`C:\Program Files (x86)\nodejs\node.exe`,
+	} {
+		if _, err := os.Stat(c); err == nil {
+			return c, nil
+		}
+	}
+	return "", errors.New("node.js not found; install Node or set ACCIO_NODE_PATH")
 }
