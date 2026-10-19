@@ -78,7 +78,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist
           Copy-Item "app/build/bin/accio-proxy.exe" -Destination "dist/accio-proxy.exe"
           Copy-Item "app/build/bin/accio-proxy.exe" -Destination "dist/accio-proxy-windows-amd64.exe"
-          Compress-Archive -Path "dist/accio-proxy.exe" -DestinationPath "dist/accio-proxy-windows-amd64.zip"
+          Copy-Item "app/security-guard" -Destination "dist/security-guard" -Recurse
+          Compress-Archive -Path "dist/accio-proxy.exe", "dist/security-guard" -DestinationPath "dist/accio-proxy-windows-amd64.zip"
 
       - name: Package Linux Binary
         if: runner.os == 'Linux'

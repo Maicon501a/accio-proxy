@@ -39,6 +39,9 @@ app/data/
 # Scratch e arquivos temporários de teste
 scratch/
 C:/Users/*
-app/security-guard/
 app/cmd/testchat/
+app/security-guard.zip
+
+# Mantém o bundle do security-guard versionado para o Modo Direto
+!app/security-guard/**
 
