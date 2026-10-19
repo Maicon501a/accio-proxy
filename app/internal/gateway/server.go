@@ -126,10 +126,22 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		email, token, err = s.picker.Pick(r.Context())
-		if err != nil {
-			httpError(w, http.StatusServiceUnavailable, "no_accounts", err.Error())
-			return
+		// Modo Direto: verifica se o cliente enviou um token válido no cabeçalho Authorization
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			rawToken := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+			if len(rawToken) > 25 && !strings.HasPrefix(rawToken, "sk-") && rawToken != "dummy" && rawToken != "none" {
+				token = rawToken
+				email = "bearer-token"
+			}
+		}
+
+		if token == "" {
+			email, token, err = s.picker.Pick(r.Context())
+			if err != nil {
+				httpError(w, http.StatusServiceUnavailable, "no_accounts", "Modo Direto: nenhuma conta ativa no banco local do proxy. Cadastre uma conta na aba 'Login Manual' ou use o Modo Oficial (recomendado) com o aplicativo Accio Desktop aberto.")
+				return
+			}
 		}
 	}
 
