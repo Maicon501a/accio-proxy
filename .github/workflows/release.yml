@@ -160,10 +160,10 @@ jobs:
             ### 💻 Como Usar
 
             #### Windows
-            1. Deixe o aplicativo oficial do Accio aberto.
-            2. Baixe e dê dois cliques no `accio-proxy.exe`.
-            3. A interface abrirá e o proxy escutará em `http://127.0.0.1:8790`.
-            4. No OpenCode ou outro cliente, configure a Base URL para `http://127.0.0.1:8790/v1`.
+            1. Baixe e dê dois cliques no `accio-proxy.exe`.
+            2. **Modo Direto (Standalone):** Os módulos nativos de segurança (`security-guard`) já vêm embutidos dentro do executável e são auto-extraídos transparentemente. Funciona direto sem precisar do app oficial instalado.
+            3. **Modo Oficial:** Pode manter o Accio Desktop aberto se preferir sincronizar contas em tempo real.
+            4. O proxy escuta em `http://127.0.0.1:8790` (compatível com OpenAI `/v1/chat/completions`).
 
             #### Linux
             ```bash

@@ -302,13 +302,26 @@ func bundleComplete(dir string) bool {
 	return true
 }
 
-// ensureBundle materialises the security-guard bundle (sg_daemon.js +
-// prebuild/ + resources/) into <dataDir>/security-guard, copying from any
-// known complete source on first run.
 func ensureBundle(dataDir string) (string, error) {
 	target := filepath.Join(dataDir, "security-guard")
 
-	// Se o target ainda não tem os binários nativos do SecurityGuard, copia de fontes instaladas do Accio
+	// 1. Se já está completo no target, retorna na hora
+	if bundleComplete(target) {
+		return target, nil
+	}
+
+	// 2. Se temos o bundle embutido no binário, extrai direto para o target
+	if hasEmbeddedBundle() {
+		log.Printf("sgbridge: extraindo bundle nativo embutido para %s", target)
+		if err := extractEmbeddedBundle(target); err != nil {
+			log.Printf("sgbridge: falha ao extrair bundle embutido: %v (tentando fontes externas)", err)
+		} else if bundleComplete(target) {
+			log.Printf("sgbridge: bundle nativo extraído com sucesso")
+			return target, nil
+		}
+	}
+
+	// 3. Fallback: Se o target ainda não tem os binários nativos do SecurityGuard, copia de fontes instaladas do Accio
 	if !hasNativeFiles(target) {
 		for _, src := range bundleSources() {
 			if !hasNativeFiles(src) {
