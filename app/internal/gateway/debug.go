@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"accio-proxy/internal/config"
 )
 
 var (
@@ -19,8 +21,7 @@ func debugDirPath() string {
 	if debugDir != "" {
 		return debugDir
 	}
-	home, _ := os.UserHomeDir()
-	debugDir = filepath.Join(home, "AppData", "Local", "AccioProxy")
+	debugDir = config.DefaultDataDir()
 	return debugDir
 }
 

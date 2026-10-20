@@ -65,13 +65,32 @@ O proxy disponibiliza um botão alternador em tempo real (na sidebar e no dashbo
 
 > [!WARNING]
 > ### AVISO CRÍTICO DE INSTABILIDADE E PENALIZAÇÃO DE BLOQUEIO
-> A réplica standalone sem dependência do aplicativo oficial em execução opera através de emulação reversa de assinaturas `sgbridge` e pool SQLite local.
+> A réplica standalone sem dependência do aplicativo oficial em execução opera através de pool SQLite local e de assinatura de device nativa em Go.
 > 
 > **Este modo encontra-se instável e apresenta problemas severos:**
 > 1. **Detecção WAF / Anti-Bot:** Os sistemas de segurança e WAF da Alibaba / SecurityGuard monitoram com rigor discrepâncias de ambiente e telemetria de dispositivo (`x-sg-wua`, device tokens, TLS fingerprints). Requisições diretas fora da runtime oficial possuem alta taxa de flagging.
 > 2. **Risco de Bloqueio Severo:** Quando detectadas anomalias pelo WAF, a conta ou dispositivo sofre **penalizações de bloqueio imediato (hard rate-limit gate 555) variando de 1 a 3 dias** sem poder realizar chamadas ou logar.
 > 
 > **Recomendação:** Para desenvolvimento contínuo, estabilidade garantida e proteção contra banimentos de conta, **mantenha sempre o aplicativo oficial Accio aberto e utilize o Modo App Oficial**.
+
+#### Por que antes o Modo Direto não funcionava no Linux
+
+O Modo Direto depende dos headers de device/WAF que o desktop envia. Até a versão anterior eles vinham de um sidecar Node que carregava o addon proprietário `security_guard.node` + `AliSafeProxy.dll` — binários **compilados só como `win32-x64` (PE)**. No Linux o Node exige `.node` em ELF e aborta no `dlopen`.
+
+A engenharia reversa do addon mostrou que ele é apenas uma *binding* N-API fina com três operações (`initUmid`, `getSecurityFactorsForWeb`, `urlSign`/`getSecurityToken` — estas duas não implementadas no Windows), e que a saída é um mapa de 13 headers: 4 criptográficos (`pctb-x-umt`, `pctb-x-mini-wua`, `pctb-x-sign`, `pctb-x-sgext`) e o resto metadado estático de device.
+
+Testes contra o gateway (appKey desktop `35336201`, `utdid` novo, 15 requests seguidos, com tools, em DeepSeek/Claude/Gemini) mostraram:
+
+| Cenário | Resultado |
+| :--- | :--- |
+| Sem nenhum header `pctb-*` | `200`, stream completo |
+| Com `pctb-*` forjados de outra URL | `200`, stream completo |
+| Só com os metadados (sem cripto) | `200`, stream completo |
+| `featureFlag/evaluate` sem assinatura | `200` |
+
+O WAF do `phoenix-gw.alibaba.com` **não valida a assinatura do SecurityGuard** para o appKey desktop. Quem autoriza é o `accessToken` do corpo + os headers de device (`utdid`, `appKey`, `version`). Por isso o proxy agora gera esses headers **nativamente em Go**, sem sidecar, sem Node, sem binário win32 — e o Modo Direto funciona igual em Windows, Linux e macOS.
+
+O caminho antigo continua disponível: `ACCIO_SG_SIDECAR=1` força o sidecar (necessário só para o hook de spoof do `sgtrace`).
 
 ---
 
@@ -222,12 +241,19 @@ cd ..
 
 # Gerar o executável nativo do Windows
 wails build
+
+# Linux
+wails build -platform linux/amd64
 ```
 
 O binário final será gerado em:
 ```
-app/build/bin/app.exe
+app/build/bin/app.exe        (Windows)
+app/build/bin/app            (Linux)
 ```
+
+> No Linux o Modo Direto é o único caminho e já vem como padrão. Não é preciso instalar
+> Node.js, nem os DLLs do Accio Desktop: os headers de device são gerados em Go puro.
 
 ---
 
@@ -235,6 +261,7 @@ app/build/bin/app.exe
 
 * **Local First:** Nenhuma credencial, cookie ou token de sessão é enviado para servidores de terceiros.
 * **Criptografia DPAPI:** O acesso aos tokens no Windows utiliza a API nativa do sistema (`CryptUnprotectData`), sem ferramentas de terceiros.
+* **Sem binário proprietário:** O Modo Direto não carrega mais o módulo nativo do SecurityGuard; os headers de device são gerados em Go puro.
 * **Isolamento de Conversas:** Suas conversas no OpenCode/Cursor continuam 100% isoladas da interface do aplicativo Accio oficial.
 
 ---

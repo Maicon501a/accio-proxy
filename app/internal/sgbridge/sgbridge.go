@@ -1,11 +1,22 @@
-// Package sgbridge manages the SecurityGuard Node sidecar that generates
-// the Baxia WAF headers (pctb-x-sign, x-mini-wua, sgext, …) the phoenix
-// gateway requires on chat requests.
+// Package sgbridge gera os headers de device/WAF que acompanham as requests de
+// chat do Accio desktop.
 //
-// The sidecar speaks JSON lines on stdin/stdout: {"id","url"} in,
-// {"id","headers"} out, plus a one-time {"ready":true} after UMID init.
-// The native addon (security_guard.node) only signs for the desktop appKey
-// 35336201 — Android mtop signing is a different family and out of scope.
+// Duas implementações convivem aqui:
+//
+//  1. nativa (native.go) — Go puro, sem dependência externa. Monta o header
+//     set de device que o desktop envia. É o caminho padrão fora do Windows e
+//     o fallback em qualquer plataforma.
+//  2. sidecar — sobe sg_daemon.js com Node e usa o addon proprietário
+//     security_guard.node (win32-x64) para gerar os campos criptográficos do
+//     SecurityGuard. Só existe binário PE, então não roda no Linux.
+//
+// Ver o cabeçalho de native.go para a evidência de que o gateway não valida a
+// assinatura SG do appKey desktop — é o que permite o Modo Direto nativo.
+//
+// O protocolo do sidecar é JSON lines em stdin/stdout: {"id","url"} entra,
+// {"id","headers"} sai, mais um {"ready":true} único depois do init do UMID.
+// O addon só assina o appKey desktop 35336201 — mtop Android é outra família
+// e está fora do escopo.
 package sgbridge
 
 import (
@@ -30,17 +41,83 @@ var defaultSGDaemonJS []byte
 
 const DesktopAppKey = "35336201"
 
-// Signer implements phoenix.Signer backed by the daemon.
+// Signer implements phoenix.Signer with the native device header set, and
+// optionally delegates to the SecurityGuard sidecar when explicitly enabled.
 type Signer struct {
-	mu      sync.Mutex
-	daemon  *daemon
-	dataDir string
+	mu         sync.Mutex
+	daemon     *daemon
+	dataDir    string
+	native     *nativeSigner
+	useSidecar bool
+	sidecarOK  bool
+	warned     bool
 }
 
-func New(dataDir string) *Signer { return &Signer{dataDir: dataDir} }
+func New(dataDir string) *Signer {
+	return &Signer{
+		dataDir:    dataDir,
+		native:     newNativeSigner(DesktopAppKey),
+		useSidecar: sidecarEnabled(),
+		sidecarOK:  true,
+	}
+}
 
-// Headers returns the WAF headers for one request URL.
+// sidecarEnabled reports whether the proprietary SecurityGuard path is used.
+// Env override wins: ACCIO_SG_SIDECAR=1 forces it on, =0 forces it off.
+// Default: on for Windows (where the bundle can run and the addon gives the
+// real SG signature), off everywhere else (the addon only ships win32-x64
+// binaries and the gateway does not enforce the signature — see native.go).
+func sidecarEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ACCIO_SG_SIDECAR"))) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	}
+	// o hook de spoof do sgtrace só existe dentro do daemon Node
+	if strings.TrimSpace(os.Getenv("ACCIO_SG_SPOOF_SEED")) != "" {
+		return true
+	}
+	return sidecarDefault()
+}
+
+// Headers returns the WAF/device headers for one request URL.
 func (s *Signer) Headers(ctx context.Context, url string) (map[string]string, error) {
+	if !s.useSidecar {
+		return s.native.Headers(ctx, url)
+	}
+	headers, err := s.sidecarHeaders(ctx, url)
+	if err != nil {
+		s.disableSidecar(err)
+		return s.native.Headers(ctx, url)
+	}
+	return headers, nil
+}
+
+// disableSidecar cai de vez para o caminho nativo na primeira falha do
+// sidecar — sem isso cada request pagaria o timeout de start do daemon.
+func (s *Signer) disableSidecar(err error) {
+	s.mu.Lock()
+	s.sidecarOK = false
+	first := !s.warned
+	s.warned = true
+	if s.daemon != nil {
+		s.daemon.shutdown()
+		s.daemon = nil
+	}
+	s.mu.Unlock()
+	if first {
+		log.Printf("sgbridge: sidecar indisponível (%v) — usando headers nativos", err)
+	}
+}
+
+func (s *Signer) sidecarHeaders(ctx context.Context, url string) (map[string]string, error) {
+	s.mu.Lock()
+	enabled := s.sidecarOK
+	s.mu.Unlock()
+	if !enabled {
+		return nil, errors.New("sidecar disabled")
+	}
 	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	d, err := s.get(callCtx)
@@ -50,7 +127,7 @@ func (s *Signer) Headers(ctx context.Context, url string) (map[string]string, er
 	return d.headers(callCtx, url)
 }
 
-// Close stops the sidecar.
+// Close stops the sidecar (the native path holds no resources).
 func (s *Signer) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

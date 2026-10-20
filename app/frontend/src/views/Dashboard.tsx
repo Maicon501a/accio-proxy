@@ -12,6 +12,7 @@ export default function Dashboard({
   const [logs, setLogs] = useState<string[]>([]);
   const currentMode = health.proxy_mode || "official";
   const isOfficialAlive = !!health.official_running;
+  const officialSupported = health.official_supported !== false;
 
   useEffect(() => {
     (window as any).go.main.App.Logs()
@@ -46,7 +47,7 @@ export default function Dashboard({
           <div className="mode-card-desc">
             {currentMode === "official"
               ? "Conecta diretamente ao aplicativo oficial Accio em execução. As requisições do OpenCode utilizam a autenticação oficial e gastam seus créditos, sem poluir a webview ou histórico de conversas do desktop."
-              : "Funciona de forma independente do app oficial, alternando requisições entre as contas salvas no banco de dados SQLite local com emulação de assinatura sgbridge."}
+              : "Funciona de forma independente do app oficial, alternando requisições entre as contas salvas no banco de dados SQLite local. Assina com os headers de device nativos em Go, sem depender do módulo proprietário do SecurityGuard."}
           </div>
         </div>
 
@@ -58,6 +59,12 @@ export default function Dashboard({
                 (currentMode === "official" ? " active official" : "")
               }
               onClick={() => onToggleMode("official")}
+              disabled={officialSupported === false}
+              title={
+                officialSupported === false
+                  ? "Indisponível nesta plataforma: depende do Accio Desktop e do DPAPI do Windows"
+                  : undefined
+              }
             >
               <span
                 className="dot"

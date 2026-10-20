@@ -52,6 +52,7 @@ export default function App() {
   };
 
   const currentMode = health.proxy_mode || "official";
+  const officialSupported = health.official_supported !== false;
 
   const toggleMode = async (targetMode: string) => {
     if (targetMode === currentMode) return;
@@ -76,6 +77,12 @@ export default function App() {
           <button
             className={"mode-btn" + (currentMode === "official" ? " active official" : "")}
             onClick={() => toggleMode("official")}
+            disabled={!officialSupported}
+            title={
+              officialSupported
+                ? "Usa a sessão do Accio Desktop aberto"
+                : "Indisponível nesta plataforma: o Modo Oficial depende do Accio Desktop e do DPAPI do Windows"
+            }
           >
             <span
               className="dot"

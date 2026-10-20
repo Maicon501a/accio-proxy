@@ -109,9 +109,10 @@ func (a *App) Health() map[string]any {
 	}
 
 	return map[string]any{
-		"gateway_port":     a.cfg.GatewayPort,
-		"proxy_mode":       a.cfg.ProxyMode,
-		"accounts":         accounts,
+		"gateway_port":       a.cfg.GatewayPort,
+		"proxy_mode":         a.cfg.ProxyMode,
+		"official_supported": config.OfficialSupported(),
+		"accounts":           accounts,
 		"active":           active,
 		"emulator_enabled": a.driver.Enabled,
 		"emulator_alive":   emulatorAlive,
@@ -137,6 +138,9 @@ func (a *App) GetProxyMode() string {
 
 // SetProxyMode alterna entre "official" e "direct".
 func (a *App) SetProxyMode(mode string) string {
+	if mode == "official" && !config.OfficialSupported() {
+		return "o Modo Oficial depende do Accio Desktop e do DPAPI do Windows — nesta plataforma use o Modo Direto"
+	}
 	if err := a.cfg.SetProxyMode(mode); err != nil {
 		return err.Error()
 	}

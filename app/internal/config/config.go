@@ -32,13 +32,12 @@ type Config struct {
 }
 
 func Default() *Config {
-	home, _ := os.UserHomeDir()
 	return &Config{
 		GatewayPort:  8790,
-		ADBPath:      `D:\Program Files\Netease\MuMuPlayer\nx_main\adb.exe`,
+		ADBPath:      platformADBPath(),
 		DeviceSerial: "127.0.0.1:16384",
-		DataDir:      filepath.Join(home, "AppData", "Local", "AccioProxy"),
-		ProxyMode:    "official",
+		DataDir:      platformDataDir(),
+		ProxyMode:    platformDefaultMode(),
 	}
 }
 
@@ -62,7 +61,12 @@ func Load() (*Config, error) {
 		return Default(), nil
 	}
 	if c.ProxyMode == "" {
-		c.ProxyMode = "official"
+		c.ProxyMode = platformDefaultMode()
+	}
+	if c.ProxyMode == "official" && !platformSupportsOfficial() {
+		// config herdado/copiado do Windows: o modo oficial não tem como
+		// funcionar aqui (sem Accio Desktop, sem DPAPI). Cai no direto.
+		c.ProxyMode = "direct"
 	}
 	c.path = path
 	c.ensureUtdid()
@@ -84,11 +88,7 @@ func (c *Config) filePath() (string, error) {
 	if c.path != "" {
 		return c.path, nil
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	c.path = filepath.Join(home, "AppData", "Local", "AccioProxy", "config.json")
+	c.path = filepath.Join(platformConfigDir(), "config.json")
 	return c.path, nil
 }
 
@@ -130,7 +130,7 @@ func (c *Config) SetEmulatorEnabled(on bool) error {
 func (c *Config) SetProxyMode(mode string) error {
 	c.mu.Lock()
 	if mode != "direct" && mode != "official" {
-		mode = "official"
+		mode = platformDefaultMode()
 	}
 	c.ProxyMode = mode
 	c.mu.Unlock()
@@ -141,3 +141,11 @@ func (c *Config) SetProxyMode(mode string) error {
 func (c *Config) AccountsDB() string {
 	return filepath.Join(c.DataDir, "accounts.db")
 }
+
+// DefaultDataDir devolve a pasta de dados da plataforma, sem depender de um
+// Config carregado. Usado por logs e utilitários.
+func DefaultDataDir() string { return platformDataDir() }
+
+// OfficialSupported informa se o modo oficial pode funcionar nesta plataforma
+// (precisa do Accio Desktop e do DPAPI, ambos Windows-only).
+func OfficialSupported() bool { return platformSupportsOfficial() }

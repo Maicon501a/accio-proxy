@@ -55,11 +55,15 @@ export default function Accounts({
   onToggleMode?: (mode: string) => void;
 }) {
   const currentMode = health?.proxy_mode || "official";
-  const [tab, setTab] = useState<"official" | "direct">(currentMode as "official" | "direct");
+  const officialSupported = health?.official_supported !== false;
+  const [tab, setTab] = useState<"official" | "direct">(
+    (currentMode as "official" | "direct") === "official" && !officialSupported ? "direct" : (currentMode as "official" | "direct")
+  );
 
   // Keep tab synced when mode changes externally unless user manually switched tab
   useEffect(() => {
-    setTab(currentMode as "official" | "direct");
+    const next = (currentMode as "official" | "direct") === "official" && !officialSupported ? "direct" : (currentMode as "official" | "direct");
+    setTab(next);
   }, [currentMode]);
 
   // Direct Mode State
@@ -189,6 +193,12 @@ export default function Accounts({
           <button
             className={"subtab-btn" + (tab === "official" ? " active" : "")}
             onClick={() => setTab("official")}
+            disabled={!officialSupported}
+            title={
+              officialSupported
+                ? undefined
+                : "Indisponível aqui: o App Oficial depende do Accio Desktop e do DPAPI do Windows"
+            }
           >
             App Oficial {isOfficialAlive ? "(Online)" : ""}
           </button>
