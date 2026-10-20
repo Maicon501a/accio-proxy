@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -23,11 +25,15 @@ type Account struct {
 	Credits      int    `json:"credits"`
 	Pinned       bool   `json:"pinned"`
 	Note         string `json:"note"`
+	Origin       string `json:"origin"` // "" | "vault" (importada do Accio Desktop) | "oauth"
 	CreatedAt    string `json:"created_at"`
 	LastUsedAt   string `json:"last_used_at"`
 	CreditsInfo  string `json:"credits_info"`
 	RefreshToken string `json:"-"`
 }
+
+// OriginVault marca as contas importadas do Accio Desktop.
+const OriginVault = "vault"
 
 var ErrEmpty = errors.New("no accounts available")
 
@@ -44,6 +50,13 @@ type Store struct {
 }
 
 func Open(path string) (*Store, error) {
+	// sqlite não cria diretórios: sem isso o primeiro boot numa instalação
+	// limpa (Linux, XDG paths) falha e o store fica nil.
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("criar diretório do banco: %w", err)
+		}
+	}
 	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
 	if err != nil {
 		return nil, err
@@ -56,7 +69,12 @@ func Open(path string) (*Store, error) {
 	return s, nil
 }
 
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	return s.db.Close()
+}
 
 func (s *Store) migrate() error {
 	_, err := s.db.Exec(`
@@ -80,14 +98,19 @@ CREATE TABLE IF NOT EXISTS accounts (
 	_, _ = s.db.Exec(`ALTER TABLE accounts ADD COLUMN credits_info TEXT NOT NULL DEFAULT ''`)
 	// migração: conta fixada (pin) — ignora se a coluna já existe
 	_, _ = s.db.Exec(`ALTER TABLE accounts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`)
+	// migração: origem da conta — "vault" quando importada do Accio Desktop
+	_, _ = s.db.Exec(`ALTER TABLE accounts ADD COLUMN origin TEXT NOT NULL DEFAULT ''`)
 	return nil
 }
 
 // Insert adds (or updates) an account by email.
 func (s *Store) Insert(a Account) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("store indisponível")
+	}
 	res, err := s.db.Exec(`
-INSERT INTO accounts (email, access_token, user_id, utdid, status, credits, note, refresh_token)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO accounts (email, access_token, user_id, utdid, status, credits, note, refresh_token, origin)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(email) DO UPDATE SET
 	access_token=excluded.access_token,
 	user_id=excluded.user_id,
@@ -95,11 +118,12 @@ ON CONFLICT(email) DO UPDATE SET
 	status=excluded.status,
 	credits=excluded.credits,
 	refresh_token=excluded.refresh_token,
+	origin=CASE WHEN excluded.origin != '' THEN excluded.origin ELSE accounts.origin END,
 	last_used_at=''`,
-		a.Email, a.AccessToken, a.UserID, a.Utdid, a.Status, a.Credits, a.Note, a.RefreshToken)
+		a.Email, a.AccessToken, a.UserID, a.Utdid, a.Status, a.Credits, a.Note, a.RefreshToken, a.Origin)
 	if err != nil {
 		return 0, err
-}
+	}
 	id, _ := res.LastInsertId()
 	return id, nil
 }
@@ -109,6 +133,9 @@ ON CONFLICT(email) DO UPDATE SET
 // de créditos (só pula quem já tem snapshot de créditos com remaining=0 —
 // conta nunca consultada continua elegível).
 func (s *Store) Pick(ctx context.Context) (string, string, error) {
+	if s == nil || s.db == nil {
+		return "", "", ErrEmpty
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// 1) conta fixada pelo usuário — sempre vence
@@ -151,6 +178,9 @@ func (s *Store) Pick(ctx context.Context) (string, string, error) {
 
 // SetCredits persiste o snapshot de créditos (remaining no inteiro, JSON completo em credits_info).
 func (s *Store) SetCredits(email string, remaining int, infoJSON string) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`UPDATE accounts SET credits=?, credits_info=? WHERE email=?`, remaining, infoJSON, email)
@@ -159,6 +189,9 @@ func (s *Store) SetCredits(email string, remaining int, infoJSON string) error {
 
 // UpdateTokens substitui o par access/refresh de uma conta (pós-refresh).
 func (s *Store) UpdateTokens(email, access, refresh string) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`UPDATE accounts SET access_token=?, refresh_token=? WHERE email=?`, access, refresh, email)
@@ -167,6 +200,9 @@ func (s *Store) UpdateTokens(email, access, refresh string) error {
 
 // RefreshTokenOf devolve o par access/refresh atual de uma conta.
 func (s *Store) RefreshTokenOf(email string) (string, string) {
+	if s == nil || s.db == nil {
+		return "", ""
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var access, refresh string
@@ -177,6 +213,9 @@ func (s *Store) RefreshTokenOf(email string) (string, string) {
 // ListForRefresh lista todas as contas ativas com refreshToken para a
 // varredura periódica de renovação.
 func (s *Store) ListForRefresh() []RefEntry {
+	if s == nil || s.db == nil {
+		return nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rows, err := s.db.Query(`SELECT email, access_token, refresh_token FROM accounts WHERE status='active' AND refresh_token != ''`)
@@ -196,12 +235,18 @@ func (s *Store) ListForRefresh() []RefEntry {
 
 // ReportFailure marks an account as dead after repeated gateway failures.
 func (s *Store) ReportFailure(email string) {
+	if s == nil || s.db == nil {
+		return
+	}
 	_, _ = s.db.Exec(`UPDATE accounts SET status='dead' WHERE email=?`, email)
 }
 
 // List returns all accounts (newest first) for the UI.
 func (s *Store) List() ([]Account, error) {
-	rows, err := s.db.Query(`SELECT id, email, access_token, user_id, utdid, status, credits, note, created_at, last_used_at, credits_info, pinned FROM accounts ORDER BY id DESC`)
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`SELECT id, email, access_token, user_id, utdid, status, credits, note, created_at, last_used_at, credits_info, pinned, origin FROM accounts ORDER BY id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +255,7 @@ func (s *Store) List() ([]Account, error) {
 	for rows.Next() {
 		var a Account
 		var pinned int
-		if err := rows.Scan(&a.ID, &a.Email, &a.AccessToken, &a.UserID, &a.Utdid, &a.Status, &a.Credits, &a.Note, &a.CreatedAt, &a.LastUsedAt, &a.CreditsInfo, &pinned); err != nil {
+		if err := rows.Scan(&a.ID, &a.Email, &a.AccessToken, &a.UserID, &a.Utdid, &a.Status, &a.Credits, &a.Note, &a.CreatedAt, &a.LastUsedAt, &a.CreditsInfo, &pinned, &a.Origin); err != nil {
 			return nil, err
 		}
 		a.Pinned = pinned != 0
@@ -221,6 +266,9 @@ func (s *Store) List() ([]Account, error) {
 
 // CountActive returns the number of active accounts.
 func (s *Store) CountActive() (int, error) {
+	if s == nil || s.db == nil {
+		return 0, nil
+	}
 	var n int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM accounts WHERE status='active'`).Scan(&n)
 	return n, err
@@ -228,6 +276,9 @@ func (s *Store) CountActive() (int, error) {
 
 // SetStatus updates an account status by email.
 func (s *Store) SetStatus(email, status string) error {
+	if s == nil || s.db == nil {
+		return errors.New("store indisponível")
+	}
 	_, err := s.db.Exec(`UPDATE accounts SET status=? WHERE email=?`, status, email)
 	return err
 }
@@ -235,6 +286,9 @@ func (s *Store) SetStatus(email, status string) error {
 // SetPinned fixa uma conta como destino de todas as requests (apaga o pin
 // anterior). Email vazio só limpa o pin.
 func (s *Store) SetPinned(email string) error {
+	if s == nil || s.db == nil {
+		return errors.New("store indisponível")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, err := s.db.Exec(`UPDATE accounts SET pinned=0 WHERE pinned=1`); err != nil {
@@ -249,6 +303,9 @@ func (s *Store) SetPinned(email string) error {
 
 // PinnedEmail devolve a conta fixada atual ("" se nenhuma).
 func (s *Store) PinnedEmail() string {
+	if s == nil || s.db == nil {
+		return ""
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var email string
@@ -258,6 +315,9 @@ func (s *Store) PinnedEmail() string {
 
 // Delete removes an account.
 func (s *Store) Delete(email string) error {
+	if s == nil || s.db == nil {
+		return errors.New("store indisponível")
+	}
 	_, err := s.db.Exec(`DELETE FROM accounts WHERE email=?`, email)
 	return err
 }

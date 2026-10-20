@@ -113,18 +113,18 @@ func (a *App) Health() map[string]any {
 		"proxy_mode":         a.cfg.ProxyMode,
 		"official_supported": config.OfficialSupported(),
 		"accounts":           accounts,
-		"active":           active,
-		"emulator_enabled": a.driver.Enabled,
-		"emulator_alive":   emulatorAlive,
-		"factory_running":  a.factoryRunning,
-		"serving":          serving,
-		"served_count":     servedCount,
-		"official_running": offStat.Running,
-		"official_port":    offStat.Port,
-		"official_pid":     offStat.PID,
-		"official_account": offStat.ActiveAccount,
-		"official_credits": offStat.Credits,
-		"official_error":   offStat.Error,
+		"active":             active,
+		"emulator_enabled":   a.driver.Enabled,
+		"emulator_alive":     emulatorAlive,
+		"factory_running":    a.factoryRunning,
+		"serving":            serving,
+		"served_count":       servedCount,
+		"official_running":   offStat.Running,
+		"official_port":      offStat.Port,
+		"official_pid":       offStat.PID,
+		"official_account":   offStat.ActiveAccount,
+		"official_credits":   offStat.Credits,
+		"official_error":     offStat.Error,
 	}
 }
 
@@ -291,6 +291,7 @@ func (a *App) ListAccounts() []map[string]any {
 		out = append(out, map[string]any{
 			"id": x.ID, "email": x.Email, "token": masked, "status": x.Status,
 			"credits": x.Credits, "credits_info": credits, "note": x.Note,
+			"origin":  x.Origin,
 			"created": x.CreatedAt, "last_used": x.LastUsedAt, "pinned": x.Pinned,
 		})
 	}
@@ -492,6 +493,131 @@ func (a *App) SetConfig(port int, adb, serial string) string {
 	a.driver = emulator.New(adb, serial)
 	a.driver.SetEnabled(a.cfg.EmulatorEnabled)
 	return ""
+}
+
+// ImportAccountsFromVault lê o vault do Accio Desktop (accessToken +
+// refreshToken por conta lembrada) e insere no pool do Modo Direto, marcando a
+// origem como "vault" para a UI identificar. Idempotente: reimportar atualiza
+// o par de tokens em vez de duplicar.
+func (a *App) ImportAccountsFromVault() map[string]any {
+	if a.store == nil {
+		return map[string]any{"error": "store indisponível"}
+	}
+	vault, err := official.ReadVault()
+	if err != nil {
+		a.log("import vault: %v", err)
+		return map[string]any{"error": err.Error()}
+	}
+	if len(vault) == 0 {
+		return map[string]any{"error": "nenhuma conta encontrada no vault do Accio Desktop"}
+	}
+
+	imported, updated := 0, 0
+	before := map[string]bool{}
+	if list, err := a.store.List(); err == nil {
+		for _, acc := range list {
+			before[acc.Email] = true
+		}
+	}
+
+	var details []map[string]any
+	for _, v := range vault {
+		label := v.VaultLabel()
+		if _, err := a.store.Insert(account.Account{
+			Email:        label,
+			AccessToken:  v.AccessToken,
+			RefreshToken: v.RefreshToken,
+			UserID:       v.AccioID,
+			Status:       "active",
+			Note:         vaultNote(v),
+			Origin:       account.OriginVault,
+		}); err != nil {
+			a.log("import vault %s: %v", v.AccountID, err)
+			continue
+		}
+		if before[label] {
+			updated++
+		} else {
+			imported++
+		}
+		details = append(details, map[string]any{
+			"account_id":  v.AccountID,
+			"label":       label,
+			"name":        v.Name,
+			"email":       v.Email,
+			"user_level":  v.UserLevel,
+			"source":      v.Source,
+			"has_refresh": v.RefreshToken != "",
+		})
+	}
+
+	a.log("import vault: %d novas, %d atualizadas (total %d no vault)", imported, updated, len(vault))
+	for _, d := range details {
+		go a.hydrateVaultAccount(d["label"].(string))
+	}
+	return map[string]any{
+		"imported": imported,
+		"updated":  updated,
+		"total":    len(vault),
+		"accounts": details,
+	}
+}
+
+// hydrateVaultAccount renova o par de tokens (os do vault costumam estar
+// vencidos) e busca os créditos. Roda em background: a importação responde
+// na hora e a UI preenche créditos conforme cada conta fica pronta.
+func (a *App) hydrateVaultAccount(label string) {
+	access, refresh := a.store.RefreshTokenOf(label)
+	if access == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+
+	if refresh != "" {
+		if newAccess, newRefresh, err := phoenix.RefreshTokens(ctx, a.cfg.Utdid, "0.33.0", access, refresh); err == nil {
+			if err := a.store.UpdateTokens(label, newAccess, newRefresh); err == nil {
+				access = newAccess
+				a.log("vault: token renovado para %s", label)
+			}
+		} else {
+			a.log("vault: refresh de %s falhou: %v", label, err)
+		}
+	}
+
+	info, err := phoenix.QueryCredits(ctx, a.cfg.Utdid, "0.33.0", access)
+	if err != nil {
+		a.log("vault: créditos de %s: %v", label, err)
+		return
+	}
+	b, _ := json.Marshal(info)
+	remaining := 0
+	if r, ok := info["remaining"].(int); ok {
+		remaining = r
+	}
+	_ = a.store.SetCredits(label, remaining, string(b))
+}
+
+// vaultNote descreve a origem na coluna note, visível na lista.
+func vaultNote(v official.VaultAccount) string {
+	name := strings.TrimSpace(v.Name)
+	if name == "" {
+		name = strings.TrimSpace(v.Email)
+	}
+	level := strings.TrimSpace(v.UserLevel)
+	parts := []string{"Accio Desktop"}
+	if name != "" {
+		parts = append(parts, name)
+	}
+	if level != "" {
+		parts = append(parts, level)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// VaultStatus informa se o vault do Accio Desktop está disponível para import.
+func (a *App) VaultStatus() map[string]any {
+	return map[string]any{"available": official.VaultAvailable()}
 }
 
 // storePicker adapts the account store to the gateway.

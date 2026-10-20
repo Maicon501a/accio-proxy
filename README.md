@@ -92,6 +92,17 @@ O WAF do `phoenix-gw.alibaba.com` **não valida a assinatura do SecurityGuard** 
 
 O caminho antigo continua disponível: `ACCIO_SG_SIDECAR=1` força o sidecar (necessário só para o hook de spoof do `sgtrace`).
 
+#### Extrair contas do Accio Desktop
+
+Dá para usar no Modo Direto as contas que já estão logadas no Accio Desktop, sem abrir o app em runtime:
+
+1. Aba **Contas** → sub-aba **Pool Local (Direto)** → botão **extrair contas do Accio Desktop**.
+2. O proxy lê `%APPDATA%\Accio\remembered-accounts.enc` e `credentials.enc`, decifra com a chave-mestra do Electron (safeStorage → DPAPI) e adiciona cada conta ao pool.
+3. As contas importadas entram com o selo **ACCIO DESKTOP** na lista, rótulo `<accountId>@accio.desktop` e a nota com nome/nível da conta.
+4. O proxy renova o `refreshToken` de cada uma em background e busca os créditos reais. Tokens que o servidor já revogou aparecem como erro na coluna de créditos.
+
+A importação é idempotente: rodar de novo atualiza os tokens em vez de duplicar contas. Tudo é leitura local de arquivo — nada sai da máquina.
+
 ---
 
 ## 🧠 Esforços de Raciocínio (Reasoning Efforts)

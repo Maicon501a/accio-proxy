@@ -18,6 +18,8 @@ export function GetProxyMode():Promise<string>;
 
 export function Health():Promise<Record<string, any>>;
 
+export function ImportAccountsFromVault():Promise<Record<string, any>>;
+
 export function ListAccounts():Promise<Array<Record<string, any>>>;
 
 export function ListOfficialAccounts():Promise<Array<Record<string, any>>>;
@@ -53,3 +55,5 @@ export function StartGateway():Promise<string>;
 export function StopFactory():Promise<string>;
 
 export function SwitchOfficialAccount(arg1:string):Promise<string>;
+
+export function VaultStatus():Promise<Record<string, any>>;

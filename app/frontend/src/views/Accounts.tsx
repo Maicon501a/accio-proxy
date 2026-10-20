@@ -21,9 +21,13 @@ type Account = {
   pinned?: boolean;
   credits_info?: CreditsInfo;
   note: string;
+  origin?: string;
   created: string;
   last_used: string;
 };
+
+// OriginVault marca as contas importadas do Accio Desktop.
+const ORIGIN_VAULT = "vault";
 
 type OfficialAccount = {
   account_id: string;
@@ -143,6 +147,28 @@ export default function Accounts({
     refreshDirect();
   };
 
+  // Importa as contas do vault do Accio Desktop para o pool local.
+  const [importing, setImporting] = useState(false);
+  const importFromVault = async () => {
+    if (importing) return;
+    setImporting(true);
+    try {
+      const res = await (window as any).go.main.App.ImportAccountsFromVault();
+      if (res?.error) {
+        alert("Não deu para importar: " + res.error);
+      } else {
+        const parts = [`${res.imported} conta(s) nova(s)`];
+        if (res.updated) parts.push(`${res.updated} atualizada(s)`);
+        alert(`Importado do Accio Desktop: ${parts.join(", ")}.`);
+      }
+    } catch (e: any) {
+      alert("Erro ao importar: " + (e?.message || e));
+    } finally {
+      setImporting(false);
+      refreshDirect();
+    }
+  };
+
   const toggle = async (a: Account) => {
     const next = a.status === "active" ? "dead" : "active";
     await (window as any).go.main.App.SetAccountStatus(a.email, next);
@@ -232,6 +258,14 @@ export default function Accounts({
                 </button>
                 <button className="btn ghost sm" onClick={() => setShowAdd(true)}>
                   colar conta
+                </button>
+                <button
+                  className="btn ghost sm"
+                  onClick={importFromVault}
+                  disabled={importing}
+                  title="Lê as contas já logadas no Accio Desktop (accessToken + refreshToken do vault local) e adiciona ao pool do Modo Direto"
+                >
+                  {importing ? "importando…" : "extrair contas do Accio Desktop"}
                 </button>
                 <input
                   className="input"
@@ -543,6 +577,20 @@ export default function Accounts({
                       >
                         <td>
                           {a.email}
+                          {a.origin === ORIGIN_VAULT && (
+                            <span
+                              className="badge"
+                              style={{
+                                marginLeft: 8,
+                                background: "rgba(96,165,250,0.15)",
+                                border: "1px solid rgba(96,165,250,0.45)",
+                                color: "#60a5fa",
+                              }}
+                              title="Importada do vault do Accio Desktop"
+                            >
+                              <span className="dot" /> ACCIO DESKTOP
+                            </span>
+                          )}
                           {a.pinned && (
                             <span className="badge pinned-badge">
                               <span className="dot" /> FIXADA

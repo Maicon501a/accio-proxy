@@ -34,6 +34,10 @@ export function Health() {
   return window['go']['main']['App']['Health']();
 }
 
+export function ImportAccountsFromVault() {
+  return window['go']['main']['App']['ImportAccountsFromVault']();
+}
+
 export function ListAccounts() {
   return window['go']['main']['App']['ListAccounts']();
 }
@@ -104,4 +108,8 @@ export function StopFactory() {
 
 export function SwitchOfficialAccount(arg1) {
   return window['go']['main']['App']['SwitchOfficialAccount'](arg1);
+}
+
+export function VaultStatus() {
+  return window['go']['main']['App']['VaultStatus']();
 }

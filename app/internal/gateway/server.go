@@ -87,9 +87,27 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/v1/chat/completions", s.handleChat)
 	mux.HandleFunc("/v1/models", s.handleModels)
 	mux.HandleFunc("/health", s.handleHealth)
-	s.server = &http.Server{Addr: fmt.Sprintf("127.0.0.1:%d", s.port), Handler: mux}
+	s.server = &http.Server{Addr: fmt.Sprintf("127.0.0.1:%d", s.port), Handler: cors(mux)}
 	log.Printf("gateway: listening on 127.0.0.1:%d", s.port)
 	return s.server.ListenAndServe()
+}
+
+// cors responde o preflight e libera o webview do Wails. A UI roda em
+// wails://wails (ou http://wails.localhost no Windows) e chama o gateway em
+// 127.0.0.1:<port>: origem diferente, então sem os headers o fetch do
+// Playground é bloqueado pelo browser antes de chegar aqui.
+func cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Max-Age", "600")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) Stop(ctx context.Context) error {
